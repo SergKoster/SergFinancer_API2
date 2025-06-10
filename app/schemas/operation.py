@@ -6,7 +6,7 @@ from typing import Optional
 class CreateOperation(BaseModel):
     amount: float
     wallet_id: int
-    date: datetime
+    date: Optional[datetime] = None
     name: str
     description: Optional[str] = "-"
     operation_type_id: int
