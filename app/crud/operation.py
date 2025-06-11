@@ -25,7 +25,7 @@ async def get_operation(session: AsyncSession, operation_id: int):
 
 async def create_operation(session: AsyncSession, operation_in: CreateOperation):
     operation = Operation(**operation_in.model_dump())
-    await add_to_wallet(session, operation)
+    await add_to_wallet(session, operation, "add")
     
     await session.add(operation)
     await session.commit()
@@ -33,12 +33,34 @@ async def create_operation(session: AsyncSession, operation_in: CreateOperation)
     return operation
     
 
+async def update_operation(session: AsyncSession, operation_id: int, operation_in: UpdateOperation):
+    old_operation = session.get(Operation, operation_id)
+    new_operation = old_operation
+    for field, value in operation_in.model_dump(exclude_unset=True).items():
+        setattr(new_operation, field, value)
+    
+    await update_operation_balance(session, old_operation, new_operation)
+
+    await session.commit()
+    await session.refresh(new_operation)
+    return new_operation
+
+
+async def delete_operation(session: AsyncSession, operation_id: int):
+    operation = session.get(Operation, operation_id)
+
+    await add_to_wallet(session, operation, "return")
+    await session.delete(operation)
+    
+    await session.commit()
+    return operation
+
 
 
 
 # Бизнес-логика
 
-async def add_to_wallet(session: AsyncSession, operation: Operation):
+async def add_to_wallet(session: AsyncSession, operation: Operation, change: str):
     """Получаем operation и wallet_id, ищем multiplier через operation.operation_type_id
     Потом берём amount из operation и прибавляем amount * multiplier к балансу кошелька"""
     wallet = await session.get(Wallet, operation.wallet_id)
@@ -46,6 +68,18 @@ async def add_to_wallet(session: AsyncSession, operation: Operation):
     multiplier = operation_type.multiplier
     amount = operation.amount
 
-    wallet.balance += amount * multiplier
+    match change:
+        case "add":
+            wallet.balance += amount * multiplier
+        case "return":
+            wallet.balance += amount * multiplier * -1
 
 
+async def update_operation_balance(session: AsyncSession, old_operation: Operation, new_operation: Operation):
+    if old_operation.wallet_id != new_operation.wallet_id:
+        await add_to_wallet(session, old_operation, "return")
+        await add_to_wallet(session, new_operation, "add")
+    elif old_operation.wallet_id == new_operation.wallet_id and old_operation.amount != new_operation.amount:
+        await add_to_wallet(session, old_operation, "return")
+        await add_to_wallet(session, new_operation, "add")
+        
